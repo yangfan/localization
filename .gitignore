@@ -1,0 +1,8 @@
+**build**
+data/output/
+data/input/
+src/ref
+.cache/
+.vscode/
+lib/
+bin/

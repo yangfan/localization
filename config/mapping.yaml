@@ -1,0 +1,41 @@
+YAML: 1.0
+bag_path: /home/fan/ssd/Projects/ros2_ws/data/bags/NCLT/ros2_0115
+# map_data: /home/fan/ssd/Projects/ros2_ws/src/offline_mapping/data/output/keyframes/submaps/
+# map_data: /home/fan/ssd/Projects/ros2_ws/src/localization/data/input/submaps/
+map_data: /home/fan/ssd/Projects/ros2_ws/src/localization/data/input/submaps_ref/
+origin:
+  - 276727.12782504963
+  - 4685961.6148576168
+  - 272.52100000000002
+common:
+  dataset: nclt
+  lid_topic: points_raw
+  imu_topic: imu_raw
+  gnss_topic: gps_rtk_fix
+gnss_ext:
+  t: [0, 0.24, -0.283]
+gnss_outlier_th: 1.0
+gnss_pos_noise: 2.0
+gnss_height_noise_ratio: 10.0
+gnss_ang_noise: 5.0
+loop_outlier_th: 5.0
+lidar_continuous_num: 5
+max_iterations: 100
+loop_closure:
+  loop_dist: 30.0
+  loop_id_dist: 100
+  candidate_id_dist: 5
+  ndt_min_score: 4.5
+
+preprocess:
+  lidar_type: 2 # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
+  scan_line: 32
+  time_scale: 1e-3 # valid only for Velodyne LiDAR(lidar_type=2)
+mapping:
+  extrinsic_est_en: true
+  extrinsic_T: [0, 0, 0.28]
+  extrinsic_R: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+point_filter_num: 3
+max_iteration: 10
+imu_has_gravity: true
+viewer_on: false
