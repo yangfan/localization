@@ -22,6 +22,7 @@ find_package(pcl_conversions REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 find_package(Sophus REQUIRED)
+find_package(Pangolin REQUIRED)
 
 # find_package(PCL 1.10.0 EXACT REQUIRED PATHS "/home/fan/ssd/Projects/ros2_ws/src/localization/3rdparty/pcl-pcl-1.10.0/build")
 find_package(PCL REQUIRED)
@@ -46,5 +47,6 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(test)
+add_subdirectory(3rdparty)
 
 ament_package()
