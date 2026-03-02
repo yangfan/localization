@@ -80,6 +80,8 @@ public:
   SE3 T_imu_lidar_;
   int max_size_of_current_scan_ = 2000; // 当前扫描数据保留多少个
 
+  std::string win_name_ = "SAD.UI";
+
   //////////////////////////////// 以下和render相关 ///////////////////////////
 private:
   /// 创建OpenGL Buffers
@@ -99,6 +101,8 @@ private:
 
   void RenderLabels();
 
+  void SetWinName(const std::string &win_name);
+
 private:
   /// 窗口layout相关
   int win_width_ = 1920;
@@ -107,7 +111,6 @@ private:
   static constexpr float cam_z_near_ = 1.0;
   static constexpr float cam_z_far_ = 1e10;
   static constexpr int menu_width_ = 200;
-  const std::string win_name_ = "SAD.UI";
   const std::string dis_main_name_ = "main";
   const std::string dis_3d_name_ = "Cam 3D";
   const std::string dis_3d_main_name_ = "Cam 3D Main"; // main

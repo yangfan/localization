@@ -61,6 +61,8 @@ public:
   /// 设置需要保留多少个扫描数据
   void SetCurrentScanSize(int current_scan_size);
 
+  void SetWinName(const std::string &win_name);
+
 private:
   std::shared_ptr<PangolinWindowImpl> impl_ = nullptr;
 };

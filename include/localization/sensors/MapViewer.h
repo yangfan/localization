@@ -34,6 +34,7 @@ public:
 
   bool set_map(pcl::PointCloud<pcl::PointXYZI>::ConstPtr map_cloud);
   bool set_pose(const Sophus::SE3d &body_pose);
+  void set_pose_filter(const int filter) { pose_filter_ = filter; }
 
   bool save_map(const std::string &file) const;
   void spin() { visualizer_.spin(); }
@@ -47,4 +48,5 @@ private:
   bool map_initialized = false;
   bool pose_initialized = false;
   unsigned long kf_num_ = 0;
+  int pose_filter_ = 100;
 };

@@ -1,4 +1,4 @@
-#include "localizer/LocalizerEskf.h"
+#include "localizer/LocalizerEskfMT.h"
 #include "localizer/tools.h"
 
 #include <pcl/io/pcd_io.h>
@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 
-bool LocalizerEskf::config(const std::string &yaml) {
+bool LocalizerEskfMT::config(const std::string &yaml) {
 
   lidar_imu_sync_ = Sync([this](const Sync::DataGroup &lidar_imu) {
     process_callback(lidar_imu);
@@ -45,7 +45,10 @@ bool LocalizerEskf::config(const std::string &yaml) {
   imu_initializer_.config(yaml);
 
   if (params_.viewer_on) {
-    viewer_ = std::make_unique<MapViewer>("ESKF Localizer", 0.5);
+    viewer_ = std::make_unique<sad::ui::PangolinWindow>();
+    viewer_->SetWinName("Localizer");
+    viewer_->Init();
+    viewer_->SetCurrentScanSize(50);
   }
 
   ndt_.setResolution(3.0);
@@ -53,7 +56,7 @@ bool LocalizerEskf::config(const std::string &yaml) {
   return true;
 };
 
-bool LocalizerEskf::load_map_info(const std::string &map_info) {
+bool LocalizerEskfMT::load_map_info(const std::string &map_info) {
 
   std::ifstream ifs(map_info);
   if (!ifs.is_open()) {
@@ -87,7 +90,7 @@ bool LocalizerEskf::load_map_info(const std::string &map_info) {
   return true;
 }
 
-bool LocalizerEskf::initialize_imu(const Sync::DataGroup &lidar_imu) {
+bool LocalizerEskfMT::initialize_imu(const Sync::DataGroup &lidar_imu) {
   for (const auto &imu : lidar_imu.imu_sequence) {
     if (imu_initializer_.addImu(*imu)) {
       break;
@@ -106,20 +109,20 @@ bool LocalizerEskf::initialize_imu(const Sync::DataGroup &lidar_imu) {
   return true;
 }
 
-void LocalizerEskf::add_scan(
+void LocalizerEskfMT::add_scan(
     std::unique_ptr<sensor_msgs::msg::PointCloud2> scan_msg) {
   lidar_imu_sync_.add_cloud(std::move(scan_msg));
 }
-void LocalizerEskf::add_imu(std::unique_ptr<sensor_msgs::msg::Imu> imu_msg) {
+void LocalizerEskfMT::add_imu(std::unique_ptr<sensor_msgs::msg::Imu> imu_msg) {
   lidar_imu_sync_.add_imu(std::move(imu_msg));
 }
-void LocalizerEskf::add_gnss(
+void LocalizerEskfMT::add_gnss(
     std::unique_ptr<sensor_msgs::msg::NavSatFix> gnss_msg) {
   last_gnss_ = std::make_unique<GNSS>(*gnss_msg);
   last_gnss_->set_pos(last_gnss_->utm() - gnss_origin_);
 }
 
-void LocalizerEskf::process_callback(const Sync::DataGroup &lidar_imu) {
+void LocalizerEskfMT::process_callback(const Sync::DataGroup &lidar_imu) {
   lidar_imu_ = lidar_imu;
   if (!imu_initializer_.success()) {
     initialize_imu(lidar_imu_);
@@ -135,9 +138,9 @@ void LocalizerEskf::process_callback(const Sync::DataGroup &lidar_imu) {
   }
 }
 
-bool LocalizerEskf::load_map(const Sophus::SE3d &cur_pose) {
+bool LocalizerEskfMT::load_map(const Sophus::SE3d &cur_pose) {
   const MapId map_id = map_.map_id(cur_pose.translation().head<2>());
-  bool map_updated = false;
+  map_updated_ = false;
 
   for (int xx = -1; xx < 2; ++xx) {
     for (int yy = -1; yy < 2; ++yy) {
@@ -153,7 +156,7 @@ bool LocalizerEskf::load_map(const Sophus::SE3d &cur_pose) {
       LOG(INFO) << "submap " << m_id.transpose() << " loaded.";
       map_.data.insert({m_id, submap});
 
-      map_updated = true;
+      map_updated_ = true;
     }
   }
 
@@ -162,27 +165,50 @@ bool LocalizerEskf::load_map(const Sophus::SE3d &cur_pose) {
     if ((m_id - map_id).cast<double>().norm() > 3.0) {
       LOG(INFO) << "submap " << m_id.transpose() << " deleted.";
       it = map_.data.erase(it);
-      map_updated = true;
+      map_updated_ = true;
     } else {
       it++;
     }
   }
 
-  if (map_updated) {
+  if (map_updated_) {
     map_.cloud.reset(new PointCloudType);
     for (const auto &submap : map_.data) {
       *map_.cloud += *submap.second;
     }
-    if (viewer_) {
-      viewer_->set_map(map_.cloud);
+    if (method_ == EstimateMethod::ESKF) {
+      cv_update_target_.notify_one();
+    } else if (method_ == EstimateMethod::GNSS) {
+
+      if (viewer_) {
+        viewer_->UpdatePointCloudGlobal(map_.data);
+      }
+      ndt_.setInputTarget(map_.cloud);
+      map_updated_ = false;
+      thd_update_target_ = std::thread([this]() { this->update_target(); });
     }
-    ndt_.setInputTarget(map_.cloud);
   }
 
-  return map_updated;
+  return map_updated_;
 }
+
+void LocalizerEskfMT::update_target() {
+  while (update_thd_on_) {
+    std::unique_lock ndt_lock(mtx_ndt_);
+    cv_update_target_.wait(ndt_lock, [this] { return map_updated_; });
+    LOG(INFO) << "updating ndt target.";
+    ndt_.setInputTarget(map_.cloud);
+    ndt_lock.unlock();
+
+    if (viewer_) {
+      viewer_->UpdatePointCloudGlobal(map_.data);
+    }
+    map_updated_ = false;
+  }
+}
+
 // make sure robot is static
-void LocalizerEskf::relocalize() {
+void LocalizerEskfMT::relocalize() {
   Sophus::SE3d initial_pose;
   initial_pose.translation() = last_gnss_->pos();
   LOG(INFO) << "gnss pos: " << initial_pose.translation().transpose();
@@ -207,11 +233,12 @@ void LocalizerEskf::relocalize() {
   method_ = EstimateMethod::ESKF;
 
   if (viewer_) {
-    viewer_->set_pose(initial_pose);
+    viewer_->UpdateNavState(eskf_.state());
+    viewer_->UpdateScan(source_cloud_, initial_pose);
   }
 }
 
-bool LocalizerEskf::search_gnss(Sophus::SE3d &initial_pose) {
+bool LocalizerEskfMT::search_gnss(Sophus::SE3d &initial_pose) {
 
   constexpr double deg_inc = 5;
   constexpr int num = 360 / deg_inc;
@@ -249,7 +276,7 @@ bool LocalizerEskf::search_gnss(Sophus::SE3d &initial_pose) {
   return true;
 }
 
-void LocalizerEskf::multi_level_align(Sophus::SE3d &pose, double &score) {
+void LocalizerEskfMT::multi_level_align(Sophus::SE3d &pose, double &score) {
   if (source_cloud_->empty()) {
     return;
   }
@@ -280,7 +307,7 @@ void LocalizerEskf::multi_level_align(Sophus::SE3d &pose, double &score) {
 }
 
 pcl::PointCloud<pcl::PointXYZI>::Ptr
-LocalizerEskf::desampling(const double leaf_sz) {
+LocalizerEskfMT::desampling(const double leaf_sz) {
 
   LidarPointCloudPtr cloud_I = lidar_imu_.scan;
 
@@ -309,7 +336,7 @@ LocalizerEskf::desampling(const double leaf_sz) {
   return desmapled_cloud;
 }
 
-void LocalizerEskf::predict() {
+void LocalizerEskfMT::predict() {
   states_.clear();
   states_.reserve(lidar_imu_.imu_sequence.size() + 1);
   states_.emplace_back(eskf_.state());
@@ -322,7 +349,7 @@ void LocalizerEskf::predict() {
   return;
 }
 
-void LocalizerEskf::undistort() {
+void LocalizerEskfMT::undistort() {
   auto cloud = lidar_imu_.scan;
   auto imu_state = eskf_.state();
   Sophus::SE3d Tw_end(imu_state.rot, imu_state.pos);
@@ -341,8 +368,7 @@ void LocalizerEskf::undistort() {
                       pt.getVector3fMap().template cast<double>();
                   Eigen::Vector3d p_compensate =
                       T_IL_.inverse() * Tw_end.inverse() * Twi * T_IL_ * pi;
-                  // Eigen::Vector3d p_compensate =
-                  //     Tw_end.inverse() * Twi * T_IL_ * pi;
+                  // Vec3d p_compensate = T_end.inverse() * Ti * T_IL_ * pi;
 
                   pt.x = p_compensate(0);
                   pt.y = p_compensate(1);
@@ -351,7 +377,8 @@ void LocalizerEskf::undistort() {
   scan_undistort_ = cloud;
 }
 
-void LocalizerEskf::correct() {
+void LocalizerEskfMT::correct() {
+
   LidarPointCloudPtr scan_undistort_trans(new LidarPointCloud);
   pcl::transformPointCloud(*scan_undistort_, *scan_undistort_trans,
                            T_IL_.matrix());
@@ -360,31 +387,34 @@ void LocalizerEskf::correct() {
   current_scan_ = localization::ConvertToCloud<LidarPointType>(scan_undistort_);
   current_scan_ = localization::VoxelGridFilter(current_scan_, 0.5);
 
-  Sophus::SE3d pred = eskf_.state_SE3();
-  load_map(pred);
-
+  std::unique_lock ndt_lock(mtx_ndt_);
   ndt_.setInputSource(current_scan_);
   PointCloudPtr output(new PointCloudType);
-  ndt_.align(*output, pred.matrix().cast<float>());
+  ndt_.align(*output, eskf_.state_SE3().matrix().cast<float>());
 
   Sophus::SE3d pose = localization::Mat4ToSE3(ndt_.getFinalTransformation());
+  LOG(INFO) << "NDT score: " << ndt_.getTransformationLikelihood();
+  ndt_lock.unlock();
 
   eskf_.correct_pose(pose, states_.back().timestamp, 1e-1, 1e-2);
   normalize_vel();
 
-  LOG(INFO) << "NDT score: " << ndt_.getTransformationLikelihood();
-  LOG(INFO) << "vel: "
-            << (eskf_.state().rot.inverse() * eskf_.state().vel).transpose();
-  LOG(INFO) << "vel norm: " << eskf_.state().vel.transpose().norm();
+  // LOG(INFO) << "vel: "
+  //           << (eskf_.state().rot.inverse() *
+  //           eskf_.state().vel).transpose();
+  // LOG(INFO) << "vel norm: " << eskf_.state().vel.transpose().norm();
 
   if (viewer_) {
-    viewer_->set_pose(pose);
+    viewer_->UpdateNavState(eskf_.state());
+    viewer_->UpdateScan(current_scan_, eskf_.state_SE3());
   }
+
+  load_map(eskf_.state_SE3());
 }
 
-Sophus::SE3d LocalizerEskf::integrate_imu(const IMUState &state,
-                                          const IMUPtr &imu_measure,
-                                          const double dt) const {
+Sophus::SE3d LocalizerEskfMT::integrate_imu(const IMUState &state,
+                                            const IMUPtr &imu_measure,
+                                            const double dt) const {
   const Eigen::Vector3d last_acc = imu_measure->acc;
   const Eigen::Vector3d last_omega = imu_measure->gyr;
 
@@ -396,9 +426,9 @@ Sophus::SE3d LocalizerEskf::integrate_imu(const IMUState &state,
   return Sophus::SE3d(rot, pos);
 }
 
-Sophus::SE3d LocalizerEskf::interpolation(const double ratio,
-                                          const IMUState &state0,
-                                          const IMUState &state1) const {
+Sophus::SE3d LocalizerEskfMT::interpolation(const double ratio,
+                                            const IMUState &state0,
+                                            const IMUState &state1) const {
   const Sophus::SE3d pose0(state0.rot, state0.pos);
   const Sophus::SE3d pose1(state1.rot, state1.pos);
 
@@ -410,13 +440,20 @@ Sophus::SE3d LocalizerEskf::interpolation(const double ratio,
   return Sophus::SE3d(rot, pos);
 }
 
-void LocalizerEskf::spin() {
+void LocalizerEskfMT::quit() {
+  update_thd_on_ = false;
+  map_updated_ = true;
+  cv_update_target_.notify_one();
+
+  if (thd_update_target_.joinable()) {
+    thd_update_target_.join();
+  }
   if (viewer_) {
-    viewer_->spin();
+    viewer_->Quit();
   }
 }
 
-void LocalizerEskf::normalize_vel() {
+void LocalizerEskfMT::normalize_vel() {
   Eigen::Vector3d vel_body = eskf_.state().rot.inverse() * eskf_.state().vel;
 
   // from -0.1 to 0.1

@@ -4,6 +4,8 @@
 
 #include "tools/ui/pangolin_window.h"
 
+#include <thread>
+
 // clang-format off
 DEFINE_string(source,
               "/home/fan/ssd/Projects/ros2_ws/src/localization/data/input/test/target.pcd",
@@ -26,7 +28,8 @@ int main(int argc, char **argv) {
   ui.UpdateScan(source, SE3());
 
   LOG(INFO) << "waiting";
-  sleep(60);
+
+  std::this_thread::sleep_for(std::chrono::seconds(10));
   ui.Quit();
 
   return 0;

@@ -94,7 +94,7 @@ bool MapViewer::set_pose(const Sophus::SE3d &body_pose) {
   Eigen::Affine3f T;
   T.matrix() = body_pose.matrix().cast<float>();
 
-  if (kf_num_++ % 100 == 0) {
+  if (kf_num_++ % pose_filter_ == 0) {
 
     const pcl::PointXYZ astart(body_pose.translation().x(),
                                body_pose.translation().y(),

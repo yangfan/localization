@@ -2,7 +2,6 @@
 #include <Eigen/Core>
 #include <sophus/se3.hpp>
 
-#include "localizer/tools.h"
 #include "sensors/ImuInitializer.h"
 #include "sensors/imu.h"
 

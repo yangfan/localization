@@ -85,4 +85,8 @@ void PangolinWindow::SetTImuLidar(const SE3 &T_imu_lidar) {
 
 bool PangolinWindow::ShouldQuit() { return pangolin::ShouldQuit(); }
 
+void PangolinWindow::SetWinName(const std::string &win_name) {
+  impl_->win_name_ = win_name;
+}
+
 } // namespace sad::ui
