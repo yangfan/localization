@@ -8,6 +8,25 @@
 4. Dynamic map loading
 5. Multithread processing
 
+### Results
+
+- executables:
+  - main localizer: `./bin/main_localizer`
+
+    <img src="./doc/localizer.gif" width="500" alt="localizer">
+
+    <img src="./doc/trajectory.png" width="500" alt="trajectory">
+
+  - multi-thread version (with pangolin visualizer): `./bin/main_localizer_mt`
+
+    <img src="./doc/localizerMT.gif" width="500" alt="localizerMT">
+
+    <img src="./doc/trajectoryMT.png" width="500" alt="trajectoryMT">
+
+- global map
+
+   <img src="./doc/opt2.png" width="600" alt="global">
+
 ### Initialization
 
 Goal: loading configuration, map loading, imu initialization, estimate the initial state of robot.
@@ -22,6 +41,8 @@ Goal: loading configuration, map loading, imu initialization, estimate the initi
    2. use gnss position as the initial position, map cloud as target, current scan as source, do NDT alignment with decreasing resolution and different orientation.
    3. the alignment result, zero velocity and imu configuration are used as the initial state of ESKF.
 
+- [source code](src/localizer/LocalizerEskf.cpp)
+
 ### ESKF
 
 Goal: estimate state given imu and lidar scan.
@@ -30,6 +51,8 @@ Goal: estimate state given imu and lidar scan.
 
 1. prediction: integrate imu data, compute position, velocity, orientation, bias of accerometer and gyroscope, gravity, and covariance of measurment noise.
 2. correction: given NDT alignment result (current pose), compute error state and Kalman gain, correct the nominal states and reset the error.
+
+- [source code](src/localizer/eskf.cpp)
 
 ### NDT alignment
 
@@ -44,6 +67,8 @@ Goal: based on the predicted pose from eskf, optimize the pose such that the res
 3. source cloud: the point cloud of the current undistored lidar scan.
 4. the initial guess is given by eskf prediction and alignment result is used as observation for eskf correction.
 
+- [source code](src/localizer/LocalizerEskf.cpp)
+
 ### Dynamic map loading
 
 Goal: to save memory usage, load and unload map based on current position. This is processing in seperate thread.
@@ -53,6 +78,10 @@ Goal: to save memory usage, load and unload map based on current position. This 
 0. partition map into submaps (done in mapping module)
 1. load map meta data at the initialization stage, including id and path of each submap file
 2. based on the pose estimate from eskf, load the submaps that are close to current position, unload submaps that are far away (e.g., euclidian or manhattan distance of the map id).
+
+- [source code](src/localizer/LocalizerEskf.cpp)
+
+<img src="./doc/partitions.png" width="600" alt="submaps">
 
 ### Multithread processing
 
@@ -64,6 +93,8 @@ Goal: reduce delay at the dynamic loading caused by building kd tree for NDT tar
 2. the main thread is for the ESKF state estimation. After the correction step, the main thread wakes up dynamic map loading thread by c++ `std::conditio_variable if map change is needed.
 3. the dynamic map loading thread is a event loop waiting for the notification from the main thread. Once woke up, it update viewer and kd tree of NDT target.
 4. NDT object is the data modified by both thread. A `mutex` is used for NDT object to avoid data race.
+
+- [source code](src/localizer/LocalizerEskfMT.cpp)
 
 #### issue
 
